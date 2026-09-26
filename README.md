@@ -163,7 +163,7 @@ This is the core privacy guarantee of the app: a reservation (`reservedBy`/`rese
 
 ## Deploy
 
-`deploy.sh` builds the Docker image, reconciles data files against a remote host over SSH, and restarts the container there. Data reconciliation defaults to **remote-wins**: real wishlist items and feature requests are created by people using the live app, so a local dev/test run's data file is never allowed to silently overwrite production — local is always backed up first. Pass `PREFER_LOCAL=1` to push local data instead, for a deliberate cleanup.
+`deploy.sh` builds the Docker image, reconciles data files against a remote host over SSH, and restarts the container there. Reconciliation differs per file: `wishlist-items.json` defaults to **remote-wins** (real wishlist data is only ever created by people using the live app, so a local dev/test run's copy must never silently overwrite production — local is always backed up first; pass `PREFER_LOCAL=1` to push local instead, for a deliberate cleanup). `feature-requests.json` uses a **bidirectional merge** instead, since admin triage can realistically happen locally too. `users.json` is pull-only.
 
 ```bash
 ./deploy.sh --host <ip> [--user <ssh-user>] [--key <path-to-pem>]

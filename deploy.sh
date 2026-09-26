@@ -97,6 +97,67 @@ pull_data_file() {
   fi
 }
 
+# Bidirectional ID-keyed merge (same scheme as investmentoptimizer/family-calendar):
+# records present on only one side are kept; records present on both sides are
+# resolved by updatedAt > createdAt timestamp (local wins strictly; on tie remote
+# wins). Used for feature-requests.json — admin edits (status/flagged/adminNote)
+# can happen locally via a script as well as live in the app, so a plain
+# remote-wins pull would silently drop those local edits.
+
+MERGE_PY='
+import json, sys
+local_path, remote_path, merged_path, sort_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(local_path)  as f: local_list  = json.load(f)
+with open(remote_path) as f: remote_list = json.load(f)
+local_map  = {r["id"]: r for r in local_list}
+remote_map = {r["id"]: r for r in remote_list}
+merged = {}
+for rid, rec in remote_map.items():
+    if rid not in local_map:
+        merged[rid] = rec
+for rid, rec in local_map.items():
+    if rid not in remote_map:
+        merged[rid] = rec
+for rid in set(local_map) & set(remote_map):
+    local_ts  = local_map[rid].get("updatedAt")  or local_map[rid].get("createdAt")  or ""
+    remote_ts = remote_map[rid].get("updatedAt") or remote_map[rid].get("createdAt") or ""
+    merged[rid] = local_map[rid] if local_ts > remote_ts else remote_map[rid]
+result = sorted(merged.values(), key=lambda r: r.get(sort_key) or "")
+new_r = sum(1 for r in remote_map if r not in local_map)
+new_l = sum(1 for r in local_map  if r not in remote_map)
+kept_l = sum(1 for r in set(local_map) & set(remote_map)
+             if (local_map[r].get("updatedAt") or local_map[r].get("createdAt") or "") >
+                (remote_map[r].get("updatedAt") or remote_map[r].get("createdAt") or ""))
+kept_r = len(set(local_map) & set(remote_map)) - kept_l
+with open(merged_path, "w") as f:
+    json.dump(result, f, indent=2, ensure_ascii=False)
+print(f"  +{new_r} from server, +{new_l} from local, {kept_l} local edits kept, {kept_r} server edits kept → {len(result)} total")
+'
+
+merge_json() {
+  local name="$1" sort_key="$2" default="$3"
+  local local_file="data/${name}"
+  local tmp_remote="/tmp/wishlist-merge-remote-${name}"
+  local tmp_merged="/tmp/wishlist-merge-merged-${name}"
+
+  echo "  reconciling ${name}..."
+
+  if ! $SCP "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" "$tmp_remote" 2>/dev/null; then
+    echo "    ${name}: not on server yet — pushing local"
+    [[ -f "$local_file" ]] || echo "$default" > "$local_file"
+    $SCP "$local_file" "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" || true
+    return
+  fi
+
+  [[ -f "$local_file" ]] || echo "$default" > "$local_file"
+
+  python3 - "$local_file" "$tmp_remote" "$tmp_merged" "$sort_key" <<< "$MERGE_PY"
+  cp "$tmp_merged" "$local_file"
+  cp "$local_file" "${BACKUP_DIR}/${name}"
+  $SCP "$local_file" "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}"
+  rm -f "$tmp_remote" "$tmp_merged"
+}
+
 # ── Backup + reconcile/pull all data files ────────────────────────────────────
 
 BACKUP_DIR="data/backup/$(date +%Y%m%d_%H%M%S)"
@@ -104,9 +165,11 @@ mkdir -p "$BACKUP_DIR"
 
 echo "Reconciling data files (backup → ${BACKUP_DIR})..."
 
-# Real user data — created by people using the live app. Remote wins by default.
+# Real user data, only ever written by the live app. Remote wins by default.
 reconcile_remote_authoritative "wishlist-items.json" "[]"
-reconcile_remote_authoritative "feature-requests.json" "[]"
+
+# Bidirectional — admin triage (status/flagged/adminNote) can happen locally too.
+merge_json "feature-requests.json" "createdAt" "[]"
 
 # Server-only writes (syncUser + admin panel edits) — never overridden by PREFER_LOCAL.
 pull_data_file "users.json" "[]"

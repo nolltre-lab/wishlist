@@ -173,24 +173,36 @@ unless needed for local verification.
 overridable via env var or `--host`) — matching `investmentoptimizer/docker-build-invest.sh` and
 `system-controller/deploy.sh`, neither of which require `--host` every time either.
 
-### Data reconciliation — remote is authoritative by default
+### Data reconciliation — per-file, not one blanket policy
 
-Unlike investmentoptimizer (which reconciles `portfolios.json` etc. via interactive prompt or an
-explicit `PREFER_LOCAL`/`PREFER_REMOTE` flag, defaulting to *asking*), wishlist's `deploy.sh` defaults
-straight to **remote wins** for `wishlist-items.json` and `feature-requests.json` — no prompt, no
-merge. Real wishlist data is created by people using the live app; the only way local data would ever
-differ is a local dev/test run, and that must never leak into production (this is the same failure mode
-as investmentoptimizer's 2026-08-29 SAMPO snapshot incident — see that app's CLAUDE.md). Every
-reconcile still takes a timestamped local backup first (`data/backup/<timestamp>/`), so local is never
-silently lost, just never trusted as the source of truth by default.
+`deploy.sh` treats each data file differently depending on who legitimately writes it:
 
-```bash
-PREFER_LOCAL=1 ./deploy.sh   # explicit override: push local to remote instead
-                               # (e.g. you've done a manual data clean-up locally and want it live)
-```
+- **`wishlist-items.json`** — remote wins, no prompt, no merge (`reconcile_remote_authoritative`).
+  Real wishlist data is created by people using the live app; the only way local data would ever
+  differ is a local dev/test run, and that must never leak into production (this is the same failure
+  mode as investmentoptimizer's 2026-08-29 SAMPO snapshot incident — see that app's CLAUDE.md). A
+  timestamped local backup is still taken first (`data/backup/<timestamp>/`), so local is never
+  silently lost, just never trusted as the source of truth by default.
 
-`users.json` stays plain pull-only with no override at all (as before) — it's written exclusively by
-`syncUser()` and the live Admin panel, so there's never a legitimate local edit to push.
+  ```bash
+  PREFER_LOCAL=1 ./deploy.sh   # explicit override: push local to remote instead
+                                 # (e.g. you've done a manual data clean-up locally and want it live)
+  ```
+
+- **`feature-requests.json`** — bidirectional ID-keyed merge (`merge_json`), same scheme as
+  investmentoptimizer/family-calendar: records on either side only are kept, records on both sides
+  resolved by `updatedAt`/`createdAt` (local wins on conflict, remote wins on exact tie). Unlike
+  wishlist items, admin triage (status/flagged/adminNote) is realistic to do locally as well as live in
+  the app, so a plain remote-wins pull would silently drop those edits — this file needs the merge,
+  wishlist-items.json does not. `PREFER_LOCAL`/`PREFER_REMOTE` are not consulted by `merge_json`.
+
+- **`users.json`** — plain pull-only, no override at all. Written exclusively by `syncUser()` and the
+  live Admin panel, so there's never a legitimate local edit to push.
+
+Don't default new data files to one of these blindly — ask *who writes this file* first: only the live
+app (→ remote-authoritative, `wishlist-items.json`'s pattern), the live app and occasionally a local
+script/session (→ merge, `feature-requests.json`'s pattern), or only the server internally (→ pull-only,
+`users.json`'s pattern).
 
 The container joins the same external `iqe-proxy-net` Docker network as the other apps but publishes no
 port of its own — it's reached only through Caddy, same as family-calendar.
