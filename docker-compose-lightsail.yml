@@ -1,0 +1,19 @@
+services:
+  wishlist:
+    image: wishlist:latest
+    container_name: wishlist
+    restart: unless-stopped
+    volumes:
+      - ./data/wishlist-items.json:/app/data/wishlist-items.json
+      - ./data/users.json:/app/data/users.json
+      - ./data/feature-requests.json:/app/data/feature-requests.json
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATA_DIR=/app/data
+    networks:
+      - iqe-proxy-net
+
+networks:
+  iqe-proxy-net:
+    external: true

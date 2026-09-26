@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Post-commit hook: prints the commit SHA for manual commitRef update.
+
+FILE="data/feature-requests.json"
+
+if [ ! -f "$FILE" ] || ! command -v python3 &>/dev/null; then
+  exit 0
+fi
+
+SHA=$(git rev-parse --short HEAD)
+done_count=$(python3 -c "
+import json
+try:
+  data = json.load(open('$FILE'))
+  print(sum(1 for r in data if r.get('status') == 'done' and not r.get('commitRef')))
+except: print(0)
+" 2>/dev/null)
+
+if [ "${done_count:-0}" -gt 0 ]; then
+  echo "[post-commit] $done_count feature request(s) with status=done have no commitRef."
+  echo "[post-commit] Set commitRef='$SHA' via the Admin panel, or redeploy to pick up changes."
+fi
+
+exit 0

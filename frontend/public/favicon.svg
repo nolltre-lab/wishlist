@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Deep rose background, distinct from the other apps' navy/indigo/brown palette -->
+  <rect width="64" height="64" rx="14" fill="#4c0519"/>
+
+  <!-- ribbon tails peeking out below the box -->
+  <path d="M28,52 L24,60 L30,57 Z" fill="#fbbf24"/>
+  <path d="M36,52 L40,60 L34,57 Z" fill="#fbbf24"/>
+
+  <!-- box body -->
+  <rect x="14" y="28" width="36" height="26" rx="3" fill="#f43f5e"/>
+  <!-- box lid -->
+  <rect x="11" y="22" width="42" height="9" rx="3" fill="#e11d48"/>
+
+  <!-- vertical ribbon -->
+  <rect x="29" y="22" width="6" height="32" fill="#fbbf24"/>
+  <!-- horizontal ribbon across the lid -->
+  <rect x="11" y="24" width="42" height="5" fill="#fbbf24"/>
+
+  <!-- bow loops -->
+  <ellipse cx="25" cy="16" rx="7" ry="6" transform="rotate(-25 25 16)" fill="#fbbf24"/>
+  <ellipse cx="39" cy="16" rx="7" ry="6" transform="rotate(25 39 16)" fill="#fbbf24"/>
+  <!-- bow knot -->
+  <circle cx="32" cy="18" r="4.5" fill="#fde68a"/>
+</svg>

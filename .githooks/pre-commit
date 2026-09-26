@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Pre-commit hook: shows flagged feature request backlog.
+# Pull latest: scp ubuntu@<ip>:/home/ubuntu/wishlist/data/feature-requests.json data/feature-requests.json
+
+FILE="data/feature-requests.json"
+
+if [ ! -f "$FILE" ] || ! command -v python3 &>/dev/null; then
+  exit 0
+fi
+
+open_count=$(python3 -c "
+import json, sys
+try:
+  data = json.load(open('$FILE'))
+  print(sum(1 for r in data if r.get('flagged') and r.get('status') == 'open'))
+except: print(0)
+" 2>/dev/null)
+
+inprog_count=$(python3 -c "
+import json, sys
+try:
+  data = json.load(open('$FILE'))
+  print(sum(1 for r in data if r.get('flagged') and r.get('status') == 'in-progress'))
+except: print(0)
+" 2>/dev/null)
+
+if [ "${open_count:-0}" -eq 0 ] && [ "${inprog_count:-0}" -eq 0 ]; then
+  exit 0
+fi
+
+echo ""
+echo "┌─────────────────────────────────────────────────────┐"
+echo "│  Flagged feature requests (wishlist)"
+echo "│"
+if [ "${open_count:-0}" -gt 0 ]; then
+  echo "│  Open: $open_count"
+  python3 -c "
+import json
+data = json.load(open('$FILE'))
+for r in data:
+  if r.get('flagged') and r.get('status') == 'open':
+    print(f'│  ★ [{r[\"user\"]}] {(r.get(\"page\") or \"–\")} — {r[\"text\"][:60]}')
+" 2>/dev/null
+fi
+if [ "${inprog_count:-0}" -gt 0 ]; then
+  echo "│  In progress: $inprog_count"
+  python3 -c "
+import json
+data = json.load(open('$FILE'))
+for r in data:
+  if r.get('flagged') and r.get('status') == 'in-progress':
+    print(f'│  ★ [{r[\"user\"]}] {(r.get(\"page\") or \"–\")} — {r[\"text\"][:60]}')
+" 2>/dev/null
+fi
+echo "│"
+echo "│  Pull latest: scp ubuntu@<ip>:/home/ubuntu/wishlist/data/feature-requests.json data/"
+echo "└─────────────────────────────────────────────────────┘"
+echo ""
+
+read -r -p "Address a flagged feature request before committing? [y/N] " answer
+if [[ "$answer" =~ ^[Yy]$ ]]; then
+  echo "Commit aborted."
+  exit 1
+fi
+
+exit 0
