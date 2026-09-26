@@ -36,6 +36,8 @@ done
 SSH="ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST}"
 SCP="scp -i ${SSH_KEY}"
 
+die() { echo "ERROR: $1" >&2; exit 1; }
+
 ssh_retry() {
   local tries=0
   until $SSH "$@"; do
@@ -59,9 +61,104 @@ ssh_retry "[ -f ${DATA_DIR}/feature-requests.json ]  || echo '[]' > ${DATA_DIR}/
 
 # ── Reconciliation helpers ──────────────────────────────────────────────────
 #
-# Remote (Lightsail) is authoritative by default: local is always backed up
-# first, then overwritten with the remote version. PREFER_LOCAL=1 flips a
-# single file to push-local-instead, for deliberate local data clean-up.
+# Remote (Lightsail) is authoritative by default for wishlist-items.json and
+# users.json: local is only ever a backup, overwritten with the remote version
+# on every deploy. PREFER_LOCAL=1 flips wishlist-items.json to push-local-instead,
+# for deliberate local data clean-up (users.json has no such override — nothing
+# legitimately writes it locally, ever).
+#
+# SHRINK_GUARD protects both of them from the failure mode that override exists
+# for: a remote copy that's missing or has lost most of its records (a wiped
+# volume, a bad restart, wrong DATA_DIR, etc.) must never silently overwrite a
+# good local backup just because "remote wins by default." When that's detected,
+# the script demands an interactive terminal to decide what happens next — pull
+# the smaller remote anyway, or push local up to fix remote — and refuses
+# outright in a non-interactive run (no one present to confirm real data loss).
+
+SHRINK_GUARD_FACTOR=2   # remote below local_count/this is "significantly smaller"
+
+count_records() {
+  python3 -c "
+import json, sys
+try:
+    print(len(json.load(open(sys.argv[1]))))
+except Exception:
+    print(0)
+" "$1" 2>/dev/null || echo 0
+}
+
+# Compares data/<name> (last known good) against a freshly-fetched remote copy.
+# Returns 0 — caller should proceed with the normal pull (tmp_remote is the file
+#             to pull from; may be empty if remote genuinely doesn't exist yet).
+# Returns 1 — caller should do nothing further; this function already handled it
+#             (pushed local to remote, or the whole deploy was aborted).
+guard_remote_size() {
+  local name="$1" local_file="$2" tmp_remote="$3"
+  local local_count remote_count
+
+  local_count=$(count_records "$local_file")
+  remote_count=$([[ -s "$tmp_remote" ]] && count_records "$tmp_remote" || echo 0)
+
+  # Nothing local worth protecting, or remote isn't meaningfully smaller — proceed.
+  [[ "$local_count" -eq 0 ]] && return 0
+  (( remote_count * SHRINK_GUARD_FACTOR >= local_count )) && return 0
+
+  echo ""
+  echo "  ┌─ POSSIBLE DATA LOSS: ${name}"
+  if [[ -s "$tmp_remote" ]]; then
+    echo "  │  Remote (about to pull): ${remote_count} record(s)"
+  else
+    echo "  │  Remote: missing or unreadable"
+  fi
+  echo "  │  Local  (last known good): ${local_count} record(s)"
+  echo "  └──────────────────────────────────────────"
+
+  if [[ ! -t 0 ]]; then
+    die "${name}: refusing to auto-pull a shrunk/missing remote file — not an interactive terminal to confirm. Re-run interactively (or investigate the remote copy directly) before deploying."
+  fi
+
+  echo "     [P] Pull remote anyway (accept the smaller/missing data)"
+  echo "     [K] Keep local — push it to remote instead (remote looks like the one that's wrong)"
+  echo "     [A] Abort deploy"
+  while true; do
+    read -r -p "  Choice [P/K/A]: " choice
+    case "$choice" in
+      [Pp]) return 0 ;;
+      [Kk])
+        $SCP "$local_file" "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" \
+          || die "Failed to push ${name} to remote"
+        echo "  ${name}: pushed local to remote"
+        return 1 ;;
+      [Aa]) die "Aborted during reconciliation of ${name}" ;;
+      *) echo "  Please enter P, K, or A" ;;
+    esac
+  done
+}
+
+# Fetches remote, guards it, and on a pass copies it into data/<name> (backed up).
+guarded_pull() {
+  local name="$1" default="$2"
+  local local_file="data/${name}"
+  local tmp_remote="/tmp/wishlist-guard-${name}"
+
+  [[ -f "$local_file" ]] || echo "$default" > "$local_file"
+
+  $SCP "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" "$tmp_remote" 2>/dev/null || : > "$tmp_remote"
+
+  if ! guard_remote_size "$name" "$local_file" "$tmp_remote"; then
+    rm -f "$tmp_remote"
+    return
+  fi
+
+  if [[ -s "$tmp_remote" ]]; then
+    cp "$tmp_remote" "$local_file"
+    cp "$local_file" "${BACKUP_DIR}/${name}"
+    echo "  ${name}: pulled from remote"
+  else
+    echo "  ${name}: not on server yet — using local default"
+  fi
+  rm -f "$tmp_remote"
+}
 
 reconcile_remote_authoritative() {
   local name="$1" default="$2"
@@ -76,25 +173,12 @@ reconcile_remote_authoritative() {
     return
   fi
 
-  echo "  ${name}: pulling from remote (authoritative; local kept as backup)..."
-  if $SCP "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" "$local_file" 2>/dev/null; then
-    cp "$local_file" "${BACKUP_DIR}/${name}"
-  else
-    echo "    ${name}: not on server yet — pushing local default"
-    $SCP "$local_file" "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" || true
-  fi
+  guarded_pull "$name" "$default"
 }
 
 # Pull-only, no override — nothing legitimately writes this file locally.
 pull_data_file() {
-  local name="$1" default="$2"
-  echo "  pulling ${name}..."
-  if $SCP "${REMOTE_USER}@${REMOTE_HOST}:${DATA_DIR}/${name}" "data/${name}" 2>/dev/null; then
-    cp "data/${name}" "${BACKUP_DIR}/${name}"
-  else
-    echo "    ${name}: not on server yet — using local default"
-    echo "$default" > "data/${name}"
-  fi
+  guarded_pull "$1" "$2"
 }
 
 # Bidirectional ID-keyed merge (same scheme as investmentoptimizer/family-calendar):

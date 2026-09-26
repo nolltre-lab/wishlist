@@ -204,6 +204,31 @@ app (→ remote-authoritative, `wishlist-items.json`'s pattern), the live app an
 script/session (→ merge, `feature-requests.json`'s pattern), or only the server internally (→ pull-only,
 `users.json`'s pattern).
 
+### Shrink/missing-remote guard (added 2026-09-26)
+
+`wishlist-items.json` and `users.json` — the two remote-authoritative files above — both route their
+pull through `guarded_pull()` → `guard_remote_size()` before ever overwriting the local backup copy.
+This exists because "remote wins by default" is dangerous on its own: a wiped Docker volume, a bad
+restart, or a wrong `DATA_DIR` on the remote would otherwise silently blow away a good local backup with
+an empty or corrupted file, and nobody would notice until someone asks where their wishlist went.
+
+The guard compares record counts (not byte size — JSON pretty-printing makes byte size a worse proxy
+than array length here): if the local file is empty there's nothing to protect, so first-time setup
+proceeds untouched. Otherwise, if remote is missing entirely or has fewer than `local_count /
+SHRINK_GUARD_FACTOR` records (factor is `2`, i.e. remote lost more than half), it stops and asks. In a
+non-interactive shell (`[[ ! -t 0 ]]`) it aborts the *entire* deploy immediately via `die()` — there's no
+one present to confirm the loss is expected, so refusing outright beats guessing. Interactively, it
+offers **[P]** pull the smaller remote anyway, **[K]** push local up instead (treat remote as the thing
+that's actually wrong), or **[A]** abort.
+
+`feature-requests.json`'s `merge_json` doesn't go through this guard — a bidirectional merge can't lose
+records the same way a remote-wins pull can, by construction.
+
+Covered by a standalone unit test during development (fixture files at varying record counts, run
+outside the real script) rather than committed as a test file — re-derive the same cases (same-size,
+remote-bigger, local-empty, missing-remote, shrunk-remote, borderline-at-factor) if this logic changes;
+they're cheap to write inline with a throwaway `guard_remote_size` copy and fixture JSON files in `/tmp`.
+
 The container joins the same external `iqe-proxy-net` Docker network as the other apps but publishes no
 port of its own — it's reached only through Caddy, same as family-calendar.
 
