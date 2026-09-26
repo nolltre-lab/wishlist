@@ -44,6 +44,19 @@ export default function App() {
     setActiveTab('mine');
   }, [user]);
 
+  // Prefill "new item" from a shared link (iOS Shortcut / share-sheet flow):
+  // /?link=<url>&title=<page title> opens the add-item modal pre-filled, then
+  // scrubs the query string so a refresh doesn't reopen it.
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const sharedLink = params.get('link');
+    const sharedTitle = params.get('title');
+    if (!sharedLink && !sharedTitle) return;
+    setModal({ mode: 'new', initial: { link: sharedLink || '', title: sharedTitle || '' } });
+    window.history.replaceState({}, '', window.location.pathname);
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
     const target = activeTab === 'mine' ? user.username : activeTab;
@@ -185,6 +198,7 @@ export default function App() {
       {modal && (
         <ItemModal
           item={modal.mode === 'edit' ? modal.item : null}
+          initial={modal.initial}
           onSave={saveItem}
           onDelete={modal.mode === 'edit' ? () => { deleteItem(modal.item.id); setModal(null); } : null}
           onClose={() => setModal(null)}

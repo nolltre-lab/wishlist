@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 
-export default function ItemModal({ item, onSave, onDelete, onClose }) {
-  const [title, setTitle] = useState(item?.title || '');
+export default function ItemModal({ item, initial, onSave, onDelete, onClose }) {
+  const [title, setTitle] = useState(item?.title || initial?.title || '');
   const [description, setDescription] = useState(item?.description || '');
-  const [link, setLink] = useState(item?.link || '');
+  const [link, setLink] = useState(item?.link || initial?.link || '');
   const [price, setPrice] = useState(item?.price ?? '');
   const [error, setError] = useState('');
 
@@ -24,6 +24,10 @@ export default function ItemModal({ item, onSave, onDelete, onClose }) {
           <h2>{item ? 'Redigera önskning' : 'Ny önskning'}</h2>
           <button className="icon-btn" onClick={onClose}>✕</button>
         </div>
+
+        {initial && !item && (
+          <p className="field-hint" style={{ marginTop: '-0.5rem' }}>Ifylld från den delade länken — kolla att den stämmer.</p>
+        )}
 
         <form className="modal-form" onSubmit={submit}>
           <div>

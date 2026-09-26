@@ -220,6 +220,30 @@ new user may see, same as granting calendar access in family-calendar.
 
 ---
 
+## Share-to-wishlist (iOS Shortcuts, added 2026-09-26)
+
+No in-app browser — most shopping sites block being loaded in an iframe, so it'd fail on exactly the
+pages people want to save. Instead: `App.jsx` checks `?link=<url>&title=<page title>` on load (after
+`user` resolves) and opens the "new item" modal pre-filled via `ItemModal`'s `initial` prop (kept
+separate from the `item` prop, which still exclusively controls edit-vs-new mode/the delete button —
+don't conflate the two when touching this code), then scrubs the query string with
+`history.replaceState` so a refresh doesn't reopen the modal.
+
+The other half — getting a URL into that query string with one tap — lives entirely on the phone as an
+iOS Shortcut (Share Sheet action: "Get Details of Safari Web Page" → "Open URLs" with
+`https://iqe.duckdns.org/wishlist/?link=[URL]&title=[Name]`), not in this repo. iOS does not support the
+Web Share Target API that Android/Chrome PWAs get for free, hence the Shortcuts workaround instead of a
+native share-sheet entry.
+
+**Known gap, not fixed here:** apps-home's `GET /api/auth/verify` returns a bare 401 on an expired
+session (8h `maxAge`) rather than redirecting to login, and Caddy's `forward_auth` just relays that 401
+verbatim — so a Shortcut tap after the session has lapsed lands on a raw 401 page with the shared link
+lost, instead of a login prompt that resumes the deep link afterward. Same limitation applies to any
+deep link into any app behind this gateway, not just this feature; fixing it means changing
+`apps-home`'s auth-verify/Caddy config, out of scope for a wishlist-only change.
+
+---
+
 ## Feature requests
 
 Copied wholesale from family-calendar (`data/feature-requests.json`, `GET/POST /api/feature-requests`,
